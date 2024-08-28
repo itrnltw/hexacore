@@ -23,12 +23,12 @@ headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0'
 }
 
-def read_tokens():
-    if os.path.exists('token.txt'):
-        with open('token.txt', 'r') as file:
+def readQuery():
+    if os.path.exists('query.txt'):
+        with open('query.txt', 'r') as file:
             return file.read().splitlines()
     else:
-        print("File 'token.txt' tidak ditemukan.")
+        print("File 'query.txt' tidak ditemukan.")
         return []
 
 # Fungsi untuk decode token JWT
@@ -56,6 +56,10 @@ async def fetch(session, method, url, headers=None, json=None):
     
     print(f"Gagal setelah 3 percobaan.", flush=True)
     return None
+
+def appAuth(query):
+    URL = "https://ago-api.hexacore.io/api/app-auth"
+    return requests.post(URL, headers=headers, json={'data': query}).json()
 
 async def dailyCek(session, token):
     headers['Authorization'] = token
@@ -115,7 +119,11 @@ async def process_token(session, token):
 async def main():
     init(autoreset=True)
     try:
-        tokens = read_tokens()
+        tokens: list = []
+        for query in readQuery():
+            print(f"Get Token...")
+            tokens.append(appAuth(query).get('token', 'NO TOKEN'))
+
         buy = False #if input("Buy tap pass (7_days)? (y/n): ").lower() == 'y' else False
         if buy:
             for token in tokens:
