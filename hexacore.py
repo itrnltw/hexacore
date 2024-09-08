@@ -4,6 +4,7 @@ import aiohttp
 import jwt
 import os
 import platform
+import random
 from colorama import Fore, Style, init
 
 bright = Style.BRIGHT
@@ -85,7 +86,7 @@ async def AvailableTaps(session, token):
 async def Clicked(session, token):
     headers['Authorization'] = token
     URL = "https://ago-api.hexacore.io/api/mining-complete"
-    return await fetch(session, 'POST', URL, headers=headers, json={"taps": 250})
+    return await fetch(session, 'POST', URL, headers=headers, json={"taps": random.randint(20, 100)})
 
 def buyTapPass(token):
     headers['Authorization'] = token
@@ -124,7 +125,7 @@ async def main():
             print(f"Get Token...")
             tokens.append(appAuth(query).get('token', 'NO TOKEN'))
 
-        buy = False #if input("Buy tap pass (7_days)? (y/n): ").lower() == 'y' else False
+        buy = True #if input("Buy tap pass (7_days)? (y/n): ").lower() == 'y' else False
         if buy:
             for token in tokens:
                 beli = buyTapPass(token)
