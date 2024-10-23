@@ -4,12 +4,12 @@ import platform
 import urllib.parse
 import aiohttp
 import asyncio
-import requests
 import time
 import random
 from datetime import datetime, timedelta
-from colorama import Fore, Style, init
+from colorama import init, Fore, Style, deinit
 
+init(autoreset=True)
 bright = Style.BRIGHT
 
 QUERY_FILE = 'query.txt'
@@ -68,13 +68,13 @@ async def fetch(session, method, url, headers=None, json=None):
                 if response.status in [200, 403, 400, 500]:
                     return await response.json()
                 else:
-                    print(f"Gagal!, percobaan {attempt + 1}", flush=True)
+                    print(f"Gagal!, percobaan {attempt + 1}", end="\r", flush=True)
         except aiohttp.ClientConnectionError:
-            print(f"Koneksi gagal, mencoba lagi {attempt + 1}", flush=True)
+            print(f"Koneksi gagal, mencoba lagi {attempt + 1}", end="\r", flush=True)
         except Exception as e:
-            print(f"Error: {str(e)}, mencoba lagi {attempt + 1}", flush=True)
+            print(f"Error: {str(e)}, mencoba lagi {attempt + 1}", end="\r", flush=True)
     
-    print(f"Gagal setelah 3 percobaan.", flush=True)
+    print(f"Gagal setelah 3 percobaan.", end="\r", flush=True)
     return None
 
 def generate_headers(token=None):
@@ -91,14 +91,17 @@ def generate_headers(token=None):
         headers.pop('Authorization', None)
     return headers
 
-def get_token(query):
-    return requests.post(url='https://ago-api.hexacore.io/api/app-auth', headers=generate_headers(), json={"data": query}).json()
+async def get_token(tempSession, query):
+    return await fetch(tempSession, 'POST', 'https://ago-api.hexacore.io/api/app-auth', generate_headers(), {"data": query})
 
-def dailyCek(token):
-    return requests.get(url='https://ago-api.hexacore.io/api/daily-checkin', headers=generate_headers(token)).json()
+async def buyTapPass(tempSession, token):
+    return await fetch(tempSession, 'POST', 'https://ago-api.hexacore.io/api/buy-tap-passes', generate_headers(token), {"name":"7_days"})
 
-def dailyReward(token, hari):
-    return requests.post(url='https://ago-api.hexacore.io/api/daily-checkin', headers=generate_headers(token), json={"day": hari}).json()
+async def dailyCek(tempSession, token):
+    return await fetch(tempSession, 'GET', 'https://ago-api.hexacore.io/api/daily-checkin', generate_headers(token))
+
+async def dailyReward(tempSession, token, hari):
+    return await fetch(tempSession, 'POST', 'https://ago-api.hexacore.io/api/daily-checkin', generate_headers(token), {"day": hari})
 
 async def getBalance(session, token, user_id):
     return await fetch(session, 'GET', f'https://ago-api.hexacore.io/api/balance/{user_id}', generate_headers(token))
@@ -110,110 +113,84 @@ async def clicked(session, token):
     acak = random.choice(range(20, 251, 20)) #awal, akhir, lompat
     return await fetch(session, 'POST', 'https://ago-api.hexacore.io/api/mining-complete', generate_headers(token), {"taps": acak}), acak
 
-def buyTapPass(token):
-    return requests.post(url='https://ago-api.hexacore.io/api/buy-tap-passes', headers=generate_headers(token), json={"name":"7_days"}).json()
-
 async def proses_semua_akun(session, username, token, user_id):
     poin = await getBalance(session, token, user_id)
     tersedia = await availableTaps(session, token)
     click, jumlah_taps = await clicked(session, token)
 
-    # print(cek)
-    # print(beliTap)
-    # print(harian)
-    # print(tersedia)
-    # print(poin)
-    # print(click)
-    # print(jumlah_taps)
-
     print(f"===={Fore.GREEN+bright} {username} {Style.RESET_ALL}====")
     
-    print(f"Balance\t\t: {Fore.GREEN+bright}{'{:,}'.format(poin.get('balance','err')).replace(',', '.')}{Style.RESET_ALL}")
-    print(f"Available Taps\t: {Fore.GREEN+bright if tersedia.get('available_taps', 'err') != 0 else Fore.RED}{'{:,}'.format(tersedia.get('available_taps', 'err')).replace(',', '.')}{Style.RESET_ALL}")
-    print(f"Tapped\t\t: {Fore.GREEN+bright if click['success'] == True else Fore.RED}{click['success']} | {jumlah_taps} Taps{Style.RESET_ALL}\n")
+    print(f"Balance\t\t: {Fore.GREEN+bright}{'{:,}'.format(poin.get('balance','err')).replace(',', '.')}")
+    print(f"Available Taps\t: {Fore.GREEN+bright if tersedia.get('available_taps', 'err') != 0 else Fore.RED}{'{:,}'.format(tersedia.get('available_taps', 'err')).replace(',', '.')}")
+    print(f"Tapped\t\t: {Fore.GREEN+bright if click['success'] == True else Fore.RED}{click['success']} | {jumlah_taps} Taps\n")
     
     global proses_data
     if tersedia['available_taps'] == 0:
         if username in proses_data:  # Cek apakah username ada di proses_data
-            del proses_data[username]  # Hapus dari proses_data
+            del proses_data[username]  # Hapus username yang True dari proses_data
         return False  # Jangan eksekusi lagi
     return True  # Lanjutkan eksekusi
 
-# Fungsi untuk menambahkan akun yang tersedia Tapsnya saja
+# menambahkan akun yang tersedia Tapsnya saja
 def simpan_datanya(username, token, user_id):
-    proses_data[username] = {  # Buat dictionary untuk setiap username
+    proses_data[username] = {
         'token': token,
         'user_id': user_id
     }
 
-async def main():
-    try:
+async def firstRun():
+    async with aiohttp.ClientSession() as tempSession:
         for query in readQuery():
             #initial
             sub = json.loads(urllib.parse.unquote(urllib.parse.parse_qs(query)['user'][0]))
-            namaDepan = sub['first_name'] 
             username = sub['username']
             user_id = sub['id']
-
             tokens = load_tokens()
             ambil_Token = tokens.get(username)
             # print(f"{username} Login")
             if ambil_Token:
                 token = ambil_Token.get('token')
-                cek = dailyCek(token)
+                cek = await dailyCek(tempSession, token)
                 if 'error' in cek == 'Unauthorized':  #VALIDASI TOKEN jika exired
-                    token = get_token(query)['token']
+                    token = await get_token(tempSession, query)['token']
                     if token: #Jika Token Berhasil di Generate
-                        print(f"{username} {Fore.GREEN+bright}Berhasil generate token baru{Style.RESET_ALL}", flush=True)
+                        print(f"{username}\t| {Fore.GREEN+bright}Berhasil generate token baru", flush=True)
                         update_token(username, token)
                     else:
-                        print(f"{username} {Fore.RED}Gagal generate token baru{Style.RESET_ALL}", flush=True)
+                        print(f"{username}\t| {Fore.RED}Gagal generate token baru", flush=True)
                         continue
                 else:
-                    print(f"{username} {Fore.GREEN+bright}Memakai Token yang sudah ada & valid{Style.RESET_ALL}", flush=True)
+                    print(f"{username}\t| {Fore.GREEN+bright}Memakai Token yang sudah ada & valid", flush=True)
             else:
-                print(f"{username} {Fore.RED}Tidak ada Token. Generate!{Style.RESET_ALL}", flush=True)
-                token = get_token(query)['token']
+                print(f"{username}\t| {Fore.RED}Tidak ada Token. Generate!", flush=True)
+                token = await get_token(tempSession, query)['token']
                 if token: #Jika Token Berhasil di Generate
-                    print(f"{username} {Fore.GREEN+bright}Berhasil generate token baru{Style.RESET_ALL}", flush=True)
+                    print(f"{username}\t| {Fore.GREEN+bright}Berhasil generate token baru", flush=True)
                     update_token(username, token)
                 else:
-                    print(f"{username} {Fore.RED}Gagal generate token baru. Skip...{Style.RESET_ALL}", flush=True)
+                    print(f"{username}\t| {Fore.RED}Gagal generate token baru. Skip...", flush=True)
                     continue
             if token: #VALIDASI jika Token VALID
-                beliTap = buyTapPass(token)
-                print(f"Buy Tap (7_days): {Fore.GREEN+bright if beliTap.get('success', '') else Fore.RED}{beliTap.get('success', next(iter(beliTap.values())))}{Style.RESET_ALL}")
-                cek = dailyCek(token)
-                harian = dailyReward(token, int(cek.get('next', 'err')))
-                print(f"Claim Daily\t: {Fore.GREEN+bright}Day-{cek['last']} | {Fore.GREEN+bright + harian.get('success', harian.get('error', 0)) if cek.get('is_available', False) else Fore.RED + 'Wait -'+ hitung_mundur(cek.get('available_at', 0))}{Style.RESET_ALL}\n")
+                beliTap = await buyTapPass(tempSession, token)
+                print(f"Buy Tap (7_days): {Fore.GREEN+bright if beliTap.get('success', False) else Fore.RED}{beliTap.get('success', next(iter(beliTap.values())))}")
+                cek = await dailyCek(tempSession, token)
+                harian = await dailyReward(tempSession, token, int(cek.get('next', 'err')))
+                print(f"Claim Daily\t: {Fore.GREEN+bright}Day-{cek['last']} | {Fore.GREEN+bright}{str(harian.get('success', harian.get('error', 0))) if cek.get('is_available', False) else Fore.RED + 'Wait -'+ hitung_mundur(cek.get('available_at', 0))}\n")
                 simpan_datanya(username, token, user_id)
-        
 
+async def main():
+    try:
+        await firstRun()
         global proses_data
         while True:
-            # if not username in proses_data.items():
-            #     break
-
-            # for username, akun_data in proses_data.items():
-            #     token = akun_data['token']
-            #     user_id = akun_data['user_id']
-            #     print(username)
-            #     print(token)
-            #     print(user_id)
-
-            # print(proses_data.items())
-            # if username in proses_data.items():
-            #     print(username)
-            
-
             async with aiohttp.ClientSession() as session:
                 tasks = [proses_semua_akun(session, username, akun_data['token'], akun_data['user_id']) for username, akun_data in proses_data.items() if username in proses_data]
                 results = await asyncio.gather(*tasks)
-    
+
             if all(result is False for result in results):
                 print('\nTidak ada "Available Taps" yang Tersisa')
                 break
-            # Menunggu 3 detik dan membersihkan konsol setelah semua token diproses
+
             await asyncio.sleep(2)
             clear_console()
 
